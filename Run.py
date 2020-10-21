@@ -29,6 +29,8 @@ def main(argv):
   
     Dtree = DecisionTree ("wdbc.data")
     Dtree.Train ()
+    Dtree = DecisionTree ("breast-cancer-wisconsin.data")
+    Dtree.Train ()
    
 
 if __name__ == "__main__":

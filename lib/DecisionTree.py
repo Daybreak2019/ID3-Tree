@@ -5,6 +5,7 @@ import numpy as np
 from math import log
 import matplotlib.pyplot as plt
 from sklearn import tree
+from decimal import Decimal
 
 
 #Ten real-valued features are computed for each cell nucleus:
@@ -23,21 +24,51 @@ from sklearn import tree
 #resulting in 30 features.  For instance, field 3 is Mean Radius, field
 #13 is Radius SE, field 23 is Worst Radius.
 
-RIGHT  = "Right"
-LEFT   = "Left"
+class Tree ():
+    def __init__(self, Id, Parent, Feature, Threshold):
+        self.NodeID     = Id
+        self.Parent     = Parent
+        self.Feature    = Feature
+        self.Threshold = Threshold
+        self.Left       = None
+        self.Right      = None
+
+    def IsLeaf (self):
+        return (self.Left == None and self.Right == None)
+        
 
 class DecisionTree ():
     
-    def __init__(self, DataPath):
-        self.Feature2Threshold = {}  
-        self.LoadData (DataPath)
-
-    def LoadData (self, Path):
+    def __init__(self, FileName):
+        self.Name     = FileName
+        self.TreeNode = {}
+        self.FeatureCls = []
+        
+        if (FileName == "wdbc.data"):
+            self.LoadData_wdbc (FileName)
+        elif (FileName == "breast-cancer-wisconsin.data"):
+            self.LoadData_bcw (FileName)
+        else:
+            exit (0)
+            
+    def LoadData_bcw (self, FileName):
         # load dataset
-        Df = pd.read_table("data/" + Path, sep=',', header=None)
+        Df = pd.read_table("data/" + FileName, sep=',', header=None)
+        Df.drop(0, axis = 1, inplace = True)
+        LastCol = Df.pop(Df.columns[-1])     
+        Df.insert(0, LastCol.name, LastCol)
+        self.Dataset = Df.values
+
+        # get attributs for each Feature
+        self.FeatureCls = ["Label", 
+                           "Clump Thickness", "Uniformity of Cell Size", "Uniformity of Cell Shape", "Marginal Adhesion",
+                           "Single Epithelial Cell Size", "Bare Nuclei", "Bland Chromatin", "Normal Nucleoli", "Mitoses"]
+        
+    def LoadData_wdbc (self, FileName):
+        # load dataset
+        Df = pd.read_table("data/" + FileName, sep=',', header=None)
         Df.drop(0, axis = 1, inplace = True)
         self.Dataset = Df.values
-        #self.Dataset = self.Dataset[0:40]
 
         # get attributs for each Feature
         self.FeatureCls = ["Label",
@@ -47,7 +78,7 @@ class DecisionTree ():
                            "compactness stderr", "concavity stderr", "concave_points stderr", "symmetry stderr", "fractal_dimension stderr",
                            "radius largest", "texture largest", "perimeter largest", "area largest", "smoothness largest", 
                            "compactness largest", "concavity largest", "concave_points largest", "symmetry largest", "fractal_dimension largest"]
-        
+
 
     def GetIndices (self):
         IndexList = np.arange(0, self.Features.shape[0])
@@ -75,7 +106,7 @@ class DecisionTree ():
 
     # split thresholds, j = i+1, fi + (fi+1 - fi)/2
     def GetThresholds (self, Fi, Fj):
-        return (Fi + (Fj - Fi)/2)
+        return (Fi + (Fj - Fi)/2.0)
 
 
     #split the data set
@@ -99,7 +130,6 @@ class DecisionTree ():
     def GetBestFeature(self, Dataset):
         ExampleNum = len(Dataset)
         FeatureNum = len(Dataset[0])
-
         Entropy = self.GetEntropy(Dataset)
         
         BestValue     = -0.1 # maybe all grain is 0
@@ -126,8 +156,7 @@ class DecisionTree ():
                     FeaEntropy = ConEntropy
                     FeaThreshHold = Threshold
 
-            #print ("[%2d/%d]Threshod = %f, FeaEntropy = %f" %(fIndex, FeatureNum, Threshold, FeaEntropy))
-            
+            #print ("[%2d/%d]Threshod = %f, FeaEntropy = %f" %(fIndex, FeatureNum, FeaThreshHold, FeaEntropy))            
             Gain = Entropy - FeaEntropy
             if Gain > BestValue:
                 BestValue     = Gain
@@ -136,39 +165,71 @@ class DecisionTree ():
 
         return BestFeature, BestThreshold
 
-    def CreateTree (self, Dataset, FeatureCls):
-        ClassList = [Example[0] for Example in Dataset]
-        ClsNum = len(ClassList)
+    def GetMajorCls (self, ClassList):
+        ClassNum = {}
+        for Cls in ClassList:
+            if Cls not in ClassNum.keys():
+                ClassNum[Cls] = 0 
+            ClassNum[Cls] += 1
+            
+        Majcls = 0
+        MaxNum   = 0
+        for Cls, Num in ClassNum.items ():
+            if Num > MaxNum:
+                MaxNum   = Num
+                Majcls = Cls
+        return Majcls
 
+    def NewNode (self,   Parent, Feature, Threshold):
+        NodeId = len (self.TreeNode)
+        TNode  = Tree (NodeId, Parent, Feature, Threshold)
+        self.TreeNode [NodeId] = TNode
+        #print ("Add Node: parent=%d, Feature = %s, Threshold = %f" %(Parent, Feature, Threshold))
+        return TNode
+        
+    def CreateTree (self, Parent, Dataset, FeatureCls):
+        ClassList = [Example[0] for Example in Dataset]
+        ClsNum = len(ClassList)   
+        
         # all example have the same class 
         if (ClassList.count(ClassList[0])) == ClsNum:
-            return ClassList[0]
+            return self.NewNode (Parent, ClassList[0], 0)
+            
+        # all features have been processed 
+        if (len (Dataset[0]) == 1):
+            Cls  = self.GetMajorCls (ClassList)
+            return self.NewNode (Parent, Cls , 0)
         
         BestFeature, Threshold = self.GetBestFeature(Dataset)
         BestFeatureClf = FeatureCls[BestFeature]
-        self.Feature2Threshold [BestFeatureClf] = Threshold
-        print ("[%d](BestFeature, Threshold) => (%s, %f) " %(BestFeature, BestFeatureClf, Threshold), end = " ")
-
+        
         # construct sub-tree
         Dtree = {BestFeatureClf:{}}
         SerL, SetR = self.Split(Dataset, BestFeature, Threshold)
-        print ("(Left, Right) = (%d, %d)" %(len (SerL), len (SetR)))
 
-        SubFeatureCls = FeatureCls[:] 
-        SubFeatureCls.remove (BestFeatureClf)
-        Dtree[BestFeatureClf][LEFT]  = self.CreateTree(SerL, SubFeatureCls)
-        Dtree[BestFeatureClf][RIGHT] = self.CreateTree(SetR, SubFeatureCls)
+        if (len (SerL) == 0 or len (SetR) == 0):
+            Cls = self.GetMajorCls (ClassList)
+            return self.NewNode (Parent, Cls , 0)
+        else:   
+            print ("[%d](BestFeature, Threshold) => (%s, %f), (Left, Right) = (%d, %d) " 
+                   %(BestFeature, BestFeatureClf, Threshold, len (SerL), len (SetR)))
+            TNode = self.NewNode (Parent, BestFeatureClf, Threshold)
+            
+            SubFeatureCls = FeatureCls[:] 
+            SubFeatureCls.remove (BestFeatureClf)
+            TNode.Left  = self.CreateTree(TNode.NodeID, SerL, SubFeatureCls)
+            TNode.Right = self.CreateTree(TNode.NodeID, SetR, SubFeatureCls)
         
-        return Dtree
+        return TNode
 
     def Predict (self, Dtree, FeatureCls, Example):
         # reach the leaf
-        if isinstance(Dtree, dict) == False:
-            return Dtree
+        if (Dtree.IsLeaf ()):
+            return Dtree.Feature
         
         # get the root and correlated threshold
-        FeaName  = list(Dtree.keys())[0]
-        Threshold = self.Feature2Threshold[FeaName]
+        FeaName   = Dtree.Feature
+        Threshold = Dtree.Threshold
 
         # get feature value in the example
         FeaIndex = FeatureCls.index(FeaName)
@@ -176,9 +237,9 @@ class DecisionTree ():
 
         #print ("(FeaName, Index, Value, Threshold) = (%s, %d, %f, %f)\r\n" %(FeaName, FeaIndex, FeaValue, Threshold))        
         if (FeaValue <= Threshold):
-            return self.Predict (Dtree[FeaName][LEFT], FeatureCls, Example)
+            return self.Predict (Dtree.Left, FeatureCls, Example)
         else:
-            return self.Predict (Dtree[FeaName][RIGHT], FeatureCls, Example)
+            return self.Predict (Dtree.Right, FeatureCls, Example)
     
 
     def Classify (self, Dtree, FeatureCls, Dataset):
@@ -210,14 +271,14 @@ class DecisionTree ():
         TestAcc = self.SklearnScore (clf, Testset[0::, 1::], Testset[::, 0])
         print ("Sklearn => (ValidAccuracy, PrunAccuracy) = (%f, %f)" %(ValidAcc, TestAcc))
     
-    def GetMajorityLabel (self, Tree, Dataset):
+    def GetMajorLabel (self, Tree, Dataset):
+        LabelNum = {}       
         for Example in Dataset:
-            Preds = self.Predict (Tree, self.FeatureCls, Example)
-            LabelNum = {}
-            for Label in Preds:
-                if Label not in LabelNum.keys():
-                    LabelNum[Label] = 0
-                    LabelNum[Label] += 1
+            Pred = self.Predict (Tree, self.FeatureCls, Example)           
+            if Pred not in LabelNum.keys():
+                LabelNum[Pred] = 0
+            LabelNum[Pred] += 1
+        
         MajLabel = 0
         MaxNum   = 0
         for Label, Num in LabelNum.items ():
@@ -239,69 +300,104 @@ class DecisionTree ():
             return LEFT
 
     def Pruning (self, DTree, Trainset, Validset, ValidAccuracy):
-        ParentMap = {}
-        
+        print ("\r\n\t ==> Start Pruning...")
         #bridth first visit the tree, and push all sub-tree into queue
         QIndex = 0
         Queue = []
         Queue.append (DTree)
         while QIndex < len(Queue):
             # pop the first node of queue
-            Tree = Queue[QIndex]
+            TNode = Queue[QIndex]
             QIndex += 1
-            FeaName = list(Tree.keys())[0]
             
-            LTree = Tree[FeaName][LEFT]
-            if isinstance(LTree , dict) == True:
+            LTree = TNode.Left
+            if not LTree.IsLeaf ():
                 Queue.append (LTree)
-                ParentMap[list(LTree.keys())[0]] = Tree
 
-            RTree = Tree[FeaName][RIGHT]
-            if isinstance(RTree , dict) == True:
+            RTree = TNode.Right
+            if not RTree.IsLeaf ():
                 Queue.append (RTree)
-                ParentMap[list(RTree.keys())[0]] = Tree
 
         # bottom-up visit all sub-tree, pruning with REP
         QIndex = len(Queue) - 1
         while QIndex >= 0:
             SubTree = Queue[QIndex]
-            FeaName = list(SubTree.keys())[0]
 
             # get its majority label
-            MajLabel = self.GetMajorityLabel (SubTree, Trainset)
+            MajLabel = self.GetMajorLabel (SubTree, Trainset)
 
-            if FeaName not in ParentMap.keys():
+            if SubTree.NodeID == 0:
                 # root
-                DTree = MajLabel
+                Root = self.NewNode (0, MajLabel, 0)
 
                 # compare accuracy after pruning
-                Accuracy = self.Classify (DTree, self.FeatureCls, Validset)
-                if Accuracy <= ValidAccuracy:
-                    # recover
-                    DTree = SubTree
-                else:
-                    print ("Pruning [%s](ValidAccuracy, PrunAccuracy) = (%f, %f)" %(FeaName, ValidAccuracy, Accuracy))
+                Accuracy = self.Classify (Root, self.FeatureCls, Validset)
+                if Accuracy > ValidAccuracy:
+                    print ("\tPruning [%s](ValidAccuracy, PrunAccuracy) = (%f, %f)" %(SubTree.Feature, ValidAccuracy, Accuracy))
             else:
                 # replace urrent sub-tree
-                SubTag = LEFT
-                ParentTree = ParentMap[FeaName]
-                ParentFeaName = list(ParentTree.keys())[0]
-                if self.GetSubtreeType(ParentTree, FeaName) != LEFT:
-                    SubTag = RIGHT 
-                ParentTree[ParentFeaName][SubTag] = MajLabel
+                PNode = self.TreeNode [SubTree.Parent]
+                PruneNode = self.NewNode (0, MajLabel, 0)
+
+                if (PNode.Left == SubTree):
+                    PNode.Left = PruneNode
+                else:
+                    PNode.Right = PruneNode
 
                 # compare accuracy after pruning
                 Accuracy = self.Classify (DTree, self.FeatureCls, Validset)
                 if Accuracy <= ValidAccuracy:
-                    # recover
-                    ParentTree[ParentFeaName][SubTag] = SubTree
+                    if (PNode.Left == PruneNode):
+                        PNode.Left = SubTree
+                    else:
+                        PNode.Right = SubTree
                 else:
-                    print ("Pruning [%s](ValidAccuracy, PrunAccuracy) = (%f, %f)" %(FeaName, ValidAccuracy, Accuracy))
+                    print ("\tPruning [%s](ValidAccuracy, PrunAccuracy) = (%f, %f)" %(SubTree.Feature, ValidAccuracy, Accuracy))
 
             QIndex -= 1
          
 
+    def DumpTree (self, Tag=""):
+        File = open("./result/" + self.Name + Tag + ".dot" , "w")
+
+        #header
+        File.write("digraph \"" + self.Name + "\"{\n")
+        File.write("\tlabel=\"" + self.Name + "\";\n")
+
+        Queue  = []
+        QIndex = 0
+        Queue.append (self.TreeNode[0])
+        while QIndex < len(Queue):
+            # pop the first node of queue
+            TNode = Queue[QIndex]
+            QIndex += 1
+
+            #write node
+            Label = str(TNode.Feature)
+            if not TNode.IsLeaf ():
+                Threshold = str(TNode.Threshold) 
+                Label = Label + ", THR=" + str(Decimal(Threshold).quantize(Decimal('0.00')))
+            File.write("\tN" + str(TNode.NodeID) + "[color=black, label=\"{" + Label + "}\"]\n")
+
+            if TNode.IsLeaf ():
+                continue
+
+            #write edges
+            LTree = TNode.Left
+            Queue.append (LTree)
+            File.write("\tN" + str(TNode.NodeID) + " -> N" + str(LTree.NodeID) + "[color=red" + ",label=\"{L}\"]\n")
+
+            RTree = TNode.Right
+            Queue.append (RTree)
+            File.write("\tN" + str(TNode.NodeID) + " -> N" + str(RTree.NodeID) + "[color=red" + ",label=\"{R}\"]\n")
+        File.write("}\n")
+        File.close()
+            
+        
     def Train (self):
+        print ("===========================================================")
+        print ("== Process %s" %self.Name)
+        print ("===========================================================")
         DataNum = self.Dataset.shape[0]
         IndexList = np.arange(0, DataNum)
         TrainNum  = int(DataNum * 0.7)
@@ -311,11 +407,8 @@ class DecisionTree ():
         TestIndices  = IndexList[TrainNum+ValidNum:]
 
         # create the tree by ID3
-        Dtree = self.CreateTree (self.Dataset[TrainIndices], self.FeatureCls)
-        print ("ID3 decision tree:")
-        print (Dtree)
-        for Features, Threshold in self.Feature2Threshold.items ():
-            print ("%-32s -> %f" %(Features, Threshold))
+        Dtree = self.CreateTree (-1, self.Dataset[TrainIndices], self.FeatureCls)
+        self.DumpTree ();
 
         # get accuracy on validation/test dataset
         ValidAcc = self.Classify (Dtree, self.FeatureCls, self.Dataset[ValidIndices])
@@ -330,6 +423,7 @@ class DecisionTree ():
         ValidAcc = self.Classify (Dtree, self.FeatureCls, self.Dataset[ValidIndices])
         TestAcc  = self.Classify (Dtree, self.FeatureCls, self.Dataset[TestIndices])
         print ("After Pruning  => (ValidAccuracy, TestAccuracy) = (%f, %f)" %(ValidAcc, TestAcc))
+        self.DumpTree ("Pruning");
         
 
 
